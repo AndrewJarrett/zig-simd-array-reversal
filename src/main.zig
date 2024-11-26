@@ -3,7 +3,7 @@ const Timer = std.time.Timer;
 
 pub fn main() !void {
     std.debug.print("Use 'zig test src/main.zig' in order to run tests.\n", .{});
-    std.debug.print("Run a specific algorithm by passing in the name as one of 'basic', 'xor', or 'simd'.\n\n", .{});
+    std.debug.print("Run a specific algorithm by passing in the name as one of 'std', 'basic', 'xor', or 'simd'.\n\n", .{});
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -25,11 +25,13 @@ pub fn main() !void {
     defer std.process.argsFree(arena.allocator(), args);
 
     if (args.len != 2) {
-        std.debug.print("Please specify a single parameter of 'basic', 'xor', or 'simd'.\n\n", .{});
+        std.debug.print("Please specify a single parameter of 'std', 'basic', 'xor', or 'simd'.\n\n", .{});
         return;
     }
 
-    const func: *const fn ([]u32) []u32 = if (std.mem.eql(u8, args[1], "basic"))
+    const func: *const fn ([]u32) []u32 = if (std.mem.eql(u8, args[1], "std"))
+        stdReversal
+    else if (std.mem.eql(u8, args[1], "basic"))
         basicReversal
     else if (std.mem.eql(u8, args[1], "xor"))
         xorReversal
@@ -58,6 +60,11 @@ pub fn main() !void {
     }
     std.debug.print("Minimum time: {d} ns\n", .{minTime});
     std.debug.print("Total time: {d} ms\n", .{@divTrunc(totalTime, 1000000)});
+}
+
+pub fn stdReversal(reversed: []u32) []u32 {
+    std.mem.reverse(u32, reversed);
+    return reversed;
 }
 
 pub fn basicReversal(reversed: []u32) []u32 {

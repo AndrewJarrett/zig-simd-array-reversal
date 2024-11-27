@@ -1,9 +1,19 @@
 const std = @import("std");
+const config = @import("config");
+const eql = std.mem.eql;
+
 const Timer = std.time.Timer;
 
+pub const alg = enum {
+    std,
+    basic,
+    xor,
+    simd,
+};
+
 pub fn main() !void {
-    std.debug.print("Use 'zig test src/main.zig' in order to run tests.\n", .{});
-    std.debug.print("Run a specific algorithm by passing in the name as one of 'std', 'basic', 'xor', or 'simd'.\n\n", .{});
+    std.debug.print("Use 'zig test' in order to run tests. In order to build and benchmark, run 'zig build -Dtimer run-std run-basic run-xor run-simd' to build one executable for each algorithm and run each.\n\n", .{});
+    std.debug.print("If you want to test using an external tool like 'hyperfine', then you can just build using 'zig build' and pass each exe as a parameter to hyperfine to benchmark and compare.\n\n", .{});
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -13,53 +23,47 @@ pub fn main() !void {
     const arr: [size]u32 = generateArr(size);
     var output: []u32 = undefined;
 
-    var end: u64 = 0;
-    var totalTime: u64 = 0;
-    var minTime: u64 = 0;
-
     // Copy the const array onto the heap to more accurately measure the algorithms
     var original = arena.allocator().dupe(u32, &arr) catch unreachable;
 
-    // Get the algorithm to use as an input parameter
-    const args = try std.process.argsAlloc(arena.allocator());
-    defer std.process.argsFree(arena.allocator(), args);
-
-    if (args.len != 2) {
-        std.debug.print("Please specify a single parameter of 'std', 'basic', 'xor', or 'simd'.\n\n", .{});
-        return;
-    }
-
-    const func: *const fn ([]u32) []u32 = if (std.mem.eql(u8, args[1], "std"))
-        stdReversal
-    else if (std.mem.eql(u8, args[1], "basic"))
-        basicReversal
-    else if (std.mem.eql(u8, args[1], "xor"))
-        xorReversal
-    else if (std.mem.eql(u8, args[1], "simd"))
-        simdReversal
-    else {
-        std.debug.print("Please specify a single parameter of 'basic', 'xor', or 'simd'.\n\n", .{});
-        return;
+    //const func = switch (std.meta.stringToEnum(alg, config.algorithm)) {
+    const func = comptime switch (std.meta.stringToEnum(alg, config.algorithm) orelse .std) {
+        .std => stdReversal,
+        .basic => basicReversal,
+        .xor => xorReversal,
+        .simd => simdReversal,
     };
 
     std.debug.print("Now performing basic benchmarks... Please make sure you build using 'zig build --release=fast'.\n\n", .{});
 
-    std.debug.print("Test {s} reversal with {d} elements {d} times...\n", .{ args[1], size, tests });
-    var timer: Timer = try Timer.start();
-    for (0..tests) |_| {
-        timer.reset();
-        output = func(original);
-        end = timer.read();
+    std.debug.print("Test {s} reversal with {d} elements {d} times...\n", .{ config.algorithm, size, tests });
 
-        if (end < minTime or minTime == 0) {
-            minTime = end;
+    if (config.timer) {
+        var end: u64 = 0;
+        var totalTime: u64 = 0;
+        var minTime: u64 = 0;
+
+        var timer: Timer = try Timer.start();
+        for (0..tests) |_| {
+            timer.reset();
+            output = func(original);
+            end = timer.read();
+
+            if (end < minTime or minTime == 0) {
+                minTime = end;
+            }
+            totalTime += end;
+
+            original = arena.allocator().dupe(u32, &arr) catch unreachable;
         }
-        totalTime += end;
-
-        original = arena.allocator().dupe(u32, &arr) catch unreachable;
+        std.debug.print("Minimum time: {d} ns\n", .{minTime});
+        std.debug.print("Total time: {d} ms\n", .{@divTrunc(totalTime, 1000000)});
+    } else {
+        for (0..tests) |_| {
+            output = func(original);
+            original = arena.allocator().dupe(u32, &arr) catch unreachable;
+        }
     }
-    std.debug.print("Minimum time: {d} ns\n", .{minTime});
-    std.debug.print("Total time: {d} ms\n", .{@divTrunc(totalTime, 1000000)});
 }
 
 pub fn stdReversal(reversed: []u32) []u32 {
@@ -117,32 +121,35 @@ pub fn simdReversal(reversed: []u32) []u32 {
 
             // Swap the chunks - cast to an array and get the pointer
             // then we memcpy to the reversed slice memory region
-            switch (simdSize) {
-                //8 => {
-                //    mm256_storeu_si256(&reversed[i..(i + simdSize)], @bitCast(upperReverse));
-                //    mm256_storeu_si256(&reversed[j..(j + simdSize)], @bitCast(lowerReverse));
-                //},
-                4 => {
-                    asm volatile (
-                        \\ vmovdqu %[ptr], %[x]
-                        :
-                        : [ptr] "m" (&reversed[i]),
-                          [x] "x" (upper),
-                    );
-                    asm volatile (
-                        \\ vmovdqu %[ptr], %[x]
-                        :
-                        : [ptr] "m" (&reversed[j]),
-                          [x] "x" (lower),
-                    );
-                    //mm256_storeu_si128(&reversed[i], upper);
-                    //mm256_storeu_si128(&reversed[j], lower);
-                },
-                else => {
-                    @memcpy(reversed[i..(i + simdSize)], &@as([simdSize]u32, upper));
-                    @memcpy(reversed[j..(j + simdSize)], &@as([simdSize]u32, lower));
-                },
-            }
+            //switch (simdSize) {
+            //    //8 => {
+            //    //    mm256_storeu_si256(&reversed[i..(i + simdSize)], @bitCast(upperReverse));
+            //    //    mm256_storeu_si256(&reversed[j..(j + simdSize)], @bitCast(lowerReverse));
+            //    //},
+            //    4 => {
+            //        asm volatile (
+            //            \\ vmovdqu %[ptr], %[x]
+            //            :
+            //            : [ptr] "m" (&reversed[i]),
+            //              [x] "x" (upper),
+            //        );
+            //        asm volatile (
+            //            \\ vmovdqu %[ptr], %[x]
+            //            :
+            //            : [ptr] "m" (&reversed[j]),
+            //              [x] "x" (lower),
+            //        );
+            //        //mm256_storeu_si128(&reversed[i], upper);
+            //        //mm256_storeu_si128(&reversed[j], lower);
+            //    },
+            //    2 => {
+            //
+            //    },
+            //    else => {
+            @memcpy(reversed[i..(i + simdSize)], &@as([simdSize]u32, upper));
+            @memcpy(reversed[j..(j + simdSize)], &@as([simdSize]u32, lower));
+            //    },
+            //}
         }
     }
 

@@ -4,26 +4,75 @@ To run tests:
 ```bash
 zig test src/main.zig
 ```
-In order to build and run the basic benchmark:
+In order to build and run the basic benchmark using Zig's internal high-resolution Timer functionality:
 ```bash
-zig build --release=fast && zig-out/bin/zig-simd-array-reversal
+zig build -Dtimer=true
 ```
-Currently, it appears that the basic algorithm works the best with the xor reversal and the SIMD reversal being close, but consistently slower than the approach using a temp variable. I'm not sure yet why the SIMD version is slower, 
-but it could have to do with using the Zig builtin `@memcpy` - perhaps this is a basic O(n) copy of the reversed chunks into memory which means the total algorithm is O(n + c) where c is the time taken by the SIMD operations.
+When handling the special case of an array of bytes (u8), the custom SIMD algorithm performs the best, along with byteswapping vectors and using the `std.simd.reverseOrder` method. It appears that the `std.mem.reverse` algorithm works the best with other types, at least the size of `u32` and this is most likely because of the amount of extra code that has to happen to setup the SIMD registers, perform the operations, and `@memcpy` the results back to the slice/array.
+
+Overall, the SIMD algorithm seems to perform ~5x faster than Zig's `std.mem.reverse` function for arrays of u8s. This might be further improved using inline assembly to load and store the chunks of values before performing the SIMD operations and make the generated assembly more efficient.
 
 ## Example Benchmark Run
 Here is an example run of the benchmarks showing the timing of the different algorithms.
-```test
-Use 'zig test src/main.zig' in order to run tests.
+```shell
+$ zig build -Dtimer=true
+$ ./zig-out/bin/simd
+Use 'zig test' in order to run tests. In order to build and benchmark, run 'zig build -Dtimer run-std run-basic run-xor run-simd...' to build one executable for each algorithm and run each.
 
-Now performing basic benchmarks... Please build using 'zig build --release=fast'.
+If you want to test using an external tool like 'hyperfine', then you can just build using 'zig build' and pass each exe as a parameter to hyperfine to benchmark and compare.
 
-Test basic reversal with 1,000,000 elements...
-Total time: 1462 ms
-Test xor reversal with 1,000,000 elements...
-Total time: 1841 ms
-Test SIMD reversal with 1,000,000 elements...
-Total time: 2370 ms
+Testing simd reversal with 1000000 elements 1000 times...
+Minimum time: 152567 ns
+Total time: 185 ms
 ```
 
-However, these results don't always seem to be consistent and a better benchmarking tool is likely needed to determine which version is better.
+## Using a Separate Benchmarking Tool
+Using a tool like `hyperfine` can provide some better analysis on the average run time and standard deviation.
+```shell
+$ zig build
+$ find ./zig-out/bin -type f | xargs hyperfine
+Benchmark 1: ./zig-out/bin/simd_bswap_only
+  Time (mean ± σ):     387.9 ms ±  22.3 ms    [User: 312.5 ms, System: 117.6 ms]
+  Range (min … max):   364.9 ms … 430.1 ms    10 runs
+ 
+Benchmark 2: ./zig-out/bin/xor_inline
+  Time (mean ± σ):      2.134 s ±  0.124 s    [User: 2.231 s, System: 0.137 s]
+  Range (min … max):    1.989 s …  2.390 s    10 runs
+ 
+Benchmark 3: ./zig-out/bin/xor
+  Time (mean ± σ):      2.150 s ±  0.103 s    [User: 2.230 s, System: 0.157 s]
+  Range (min … max):    1.996 s …  2.307 s    10 runs
+ 
+Benchmark 4: ./zig-out/bin/std
+  Time (mean ± σ):      1.713 s ±  0.092 s    [User: 1.787 s, System: 0.116 s]
+  Range (min … max):    1.607 s …  1.854 s    10 runs
+ 
+Benchmark 5: ./zig-out/bin/simd_std_reverse_order
+  Time (mean ± σ):     394.7 ms ±  13.0 ms    [User: 333.5 ms, System: 102.7 ms]
+  Range (min … max):   378.8 ms … 427.4 ms    10 runs
+ 
+Benchmark 6: ./zig-out/bin/simd
+  Time (mean ± σ):     349.8 ms ±  19.0 ms    [User: 281.8 ms, System: 106.8 ms]
+  Range (min … max):   325.3 ms … 397.7 ms    10 runs
+ 
+Benchmark 7: ./zig-out/bin/basic
+  Time (mean ± σ):      1.613 s ±  0.100 s    [User: 1.685 s, System: 0.107 s]
+  Range (min … max):    1.434 s …  1.743 s    10 runs
+ 
+Benchmark 8: ./zig-out/bin/basic_inline
+  Time (mean ± σ):      1.778 s ±  0.087 s    [User: 1.854 s, System: 0.118 s]
+  Range (min … max):    1.661 s …  1.933 s    10 runs
+ 
+Summary
+  './zig-out/bin/simd' ran
+    1.11 ± 0.09 times faster than './zig-out/bin/simd_bswap_only'
+    1.13 ± 0.07 times faster than './zig-out/bin/simd_std_reverse_order'
+    4.61 ± 0.38 times faster than './zig-out/bin/basic'
+    4.90 ± 0.37 times faster than './zig-out/bin/std'
+    5.08 ± 0.37 times faster than './zig-out/bin/basic_inline'
+    6.10 ± 0.48 times faster than './zig-out/bin/xor_inline'
+    6.15 ± 0.45 times faster than './zig-out/bin/xor'
+```
+
+## Analyzing Generated Assembly
+If you care to analyze the generated assembly code, you can modify the source (removing the parts that use the `config` module from the `build.zig` file) and drop it into [Godbolt](https://godbolt.org/z/qc94KcMYY). You can also examine the assembly code that is generated by the `build.zig` file in the `./zig-out/` folder.

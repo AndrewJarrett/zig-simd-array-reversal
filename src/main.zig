@@ -29,7 +29,6 @@ pub fn main() !void {
     // Copy the const array onto the heap to more accurately measure the algorithms
     var original = arena.allocator().dupe(u8, &arr) catch unreachable;
 
-    //const func = switch (std.meta.stringToEnum(alg, config.algorithm)) {
     const func = comptime switch (std.meta.stringToEnum(alg, config.algorithm) orelse .std) {
         .std => zReverse(u8, size).standard,
         .basic => zReverse(u8, size).basic,
@@ -40,8 +39,6 @@ pub fn main() !void {
         .simd_bswap_only => zReverse(u8, size).simd_bswap_only,
         .simd_std_reverse_order => zReverse(u8, size).simd_std_reverse_order,
     };
-
-    std.debug.print("Now performing basic benchmarks...", .{});
 
     std.debug.print("Testing {s} reversal with {d} elements {d} times...\n", .{ config.algorithm, size, tests });
 
@@ -447,43 +444,6 @@ test "test 1,000,000 u8 elements" {
     std.mem.reverse(u8, expected);
 
     try std.testing.expectEqualSlices(u8, expected, zReverse(u8, size).simd(original));
-}
-
-test "swap16" {
-    const arr: []const u8 = &.{ 1, 2 };
-    const expected: []const u8 = &.{ 2, 1 };
-    try std.testing.expectEqualSlices(u8, expected, &@as([2]u8, @bitCast(swap16(@bitCast(arr[0..2].*)))));
-}
-
-test "swap32" {
-    const size = 4;
-    const arr: []const u8 = &.{ 1, 2, 3, 4 };
-    const expected: []const u8 = &.{ 4, 3, 2, 1 };
-    try std.testing.expectEqualSlices(u8, expected, &@as([size]u8, @bitCast(swap32(@bitCast(arr[0..size].*)))));
-}
-
-test "swap64" {
-    const size = 2;
-    const arr: []const u32 = &.{ 1, 2 };
-    const expected: []const u32 = &.{ 2, 1 };
-    try std.testing.expectEqualSlices(u32, expected, &@as([size]u32, @bitCast(swap64(@bitCast(arr[0..size].*)))));
-}
-
-fn swap16(x: u16) u16 {
-    return (((x & 0x00FF) << 8) |
-        ((x & 0xFF00) >> 8));
-}
-
-fn swap32(x: u32) u32 {
-    return (((x & 0x000000FF) << 24) |
-        ((x & 0x0000FF00) << 8) |
-        ((x & 0x00FF0000) >> 8) |
-        ((x & 0xFF000000) >> 24));
-}
-
-fn swap64(x: u64) u64 {
-    return (((x & 0x00000000FFFFFFFF) << 32) |
-        ((x & 0xFFFFFFFF00000000) >> 32));
 }
 
 fn generateArr(comptime T: anytype, comptime size: usize) [size]T {

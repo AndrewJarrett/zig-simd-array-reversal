@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseFast });
 
-    const timerOption = b.option(bool, "timer", "Use internal zig timer instead of a profiling/benchmarking tool") orelse true;
+    const timerOption = b.option(bool, "timer", "Use internal zig timer instead of a profiling/benchmarking tool") orelse false;
 
     inline for (@typeInfo(alg).Enum.fields) |a| {
         const exe = b.addExecutable(.{
